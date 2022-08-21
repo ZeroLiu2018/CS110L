@@ -1,6 +1,10 @@
+use std::fmt;
+use std::fmt::Formatter;
 use crate::open_file::OpenFile;
 #[allow(unused)] // TODO: delete this line for Milestone 3
 use std::fs;
+use std::process::{Command, Stdio};
+use crate::process;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Process {
@@ -20,22 +24,55 @@ impl Process {
     /// information will commonly be unavailable if the process has exited. (Zombie processes
     /// still have a pid, but their resources have already been freed, including the file
     /// descriptor table.)
-    #[allow(unused)] // TODO: delete this line for Milestone 3
     pub fn list_fds(&self) -> Option<Vec<usize>> {
-        // TODO: implement for Milestone 3
-        unimplemented!();
+        let mut lsof_cmd = Command::new("lsof")
+            .arg("-X").arg("-p").arg(&self.pid.to_string()).
+            stdout(Stdio::piped()).spawn().ok()?;
+        let awk_output = Command::new("awk")
+            .arg("NR>1 {print $4}").
+            stdin(lsof_cmd.stdout.take().unwrap()).output().ok()?;
+        let mut output: Vec<usize> = Vec::new();
+        for mut _line in String::from_utf8(awk_output.stdout).ok()?.lines() {
+            let mut line = _line.to_string();
+            println!("line={}", line);
+            match line.as_bytes().last() {
+                None => {}
+                Some(ch) => {if !ch.is_ascii_digit(){
+                    line.pop();
+                }}
+            }
+            output.push(line.parse().unwrap());
+        }
+        return Some(output);
     }
 
     /// This function returns a list of (fdnumber, OpenFile) tuples, if file descriptor
     /// information is available (it returns None otherwise). The information is commonly
     /// unavailable if the process has already exited.
-    #[allow(unused)] // TODO: delete this line for Milestone 4
     pub fn list_open_files(&self) -> Option<Vec<(usize, OpenFile)>> {
         let mut open_files = vec![];
         for fd in self.list_fds()? {
             open_files.push((fd, OpenFile::from_fd(self.pid, fd)?));
         }
         Some(open_files)
+    }
+
+    pub fn print(&self) {
+        let begin = format!("========== {} ==========", self);
+        let end = "=".repeat(begin.len());
+        println!("{}", begin);
+        let fds = self.list_fds().unwrap_or_default();
+        println!("========== This Process has {} fd ==========", fds.len());
+        for (i, fd) in fds.iter().enumerate() {
+            println!("fd{} = {}", i, fd)
+        }
+        println!("{}", end);
+    }
+}
+
+impl fmt::Display for Process {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "\"{}\" (pid {}, ppid{})", self.command, self.pid, self.ppid)
     }
 }
 
