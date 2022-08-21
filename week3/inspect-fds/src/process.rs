@@ -1,10 +1,10 @@
+use crate::open_file::OpenFile;
+use crate::process;
 use std::fmt;
 use std::fmt::Formatter;
-use crate::open_file::OpenFile;
 #[allow(unused)] // TODO: delete this line for Milestone 3
 use std::fs;
 use std::process::{Command, Stdio};
-use crate::process;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Process {
@@ -25,25 +25,13 @@ impl Process {
     /// still have a pid, but their resources have already been freed, including the file
     /// descriptor table.)
     pub fn list_fds(&self) -> Option<Vec<usize>> {
-        let mut lsof_cmd = Command::new("lsof")
-            .arg("-X").arg("-p").arg(&self.pid.to_string()).
-            stdout(Stdio::piped()).spawn().ok()?;
-        let awk_output = Command::new("awk")
-            .arg("NR>1 {print $4}").
-            stdin(lsof_cmd.stdout.take().unwrap()).output().ok()?;
-        let mut output: Vec<usize> = Vec::new();
-        for mut _line in String::from_utf8(awk_output.stdout).ok()?.lines() {
-            let mut line = _line.to_string();
-            println!("line={}", line);
-            match line.as_bytes().last() {
-                None => {}
-                Some(ch) => {if !ch.is_ascii_digit(){
-                    line.pop();
-                }}
-            }
-            output.push(line.parse().unwrap());
+        let rd = fs::read_dir(format!("/proc/{}/fd", self.pid)).ok()?;
+        let mut fds = Vec::new();
+        for entry in rd {
+            let entry = entry.ok()?;
+            fds.push(entry.file_name().into_string().unwrap().parse().unwrap());
         }
-        return Some(output);
+        return Some(fds);
     }
 
     /// This function returns a list of (fdnumber, OpenFile) tuples, if file descriptor
@@ -61,18 +49,36 @@ impl Process {
         let begin = format!("========== {} ==========", self);
         let end = "=".repeat(begin.len());
         println!("{}", begin);
-        let fds = self.list_fds().unwrap_or_default();
-        println!("========== This Process has {} fd ==========", fds.len());
-        for (i, fd) in fds.iter().enumerate() {
-            println!("fd{} = {}", i, fd)
+        match self.list_open_files() {
+            None => println!(
+                "Warning: could not inspect file descriptors for this process! \
+            It might have exited just as we were about to look at its fd table, \
+            or it might have exited a while ago and is waiting for the parent \
+            to reap it."
+            ),
+            Some(open_files) => {
+                for (fd, file) in open_files {
+                    println!(
+                        "{:<4} {:<15} cursor: {:<4} {}",
+                        fd,
+                        format!("({})", file.access_mode),
+                        file.cursor,
+                        file.colorized_name(),
+                    );
+                }
+            }
         }
-        println!("{}", end);
+        println!("{}\n", end);
     }
 }
 
 impl fmt::Display for Process {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "\"{}\" (pid {}, ppid{})", self.command, self.pid, self.ppid)
+        write!(
+            f,
+            "\"{}\" (pid {}, ppid{})",
+            self.command, self.pid, self.ppid
+        )
     }
 }
 

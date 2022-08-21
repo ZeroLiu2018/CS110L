@@ -3,6 +3,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 #[allow(unused_imports)] // TODO: delete this line for Milestone 4
 use std::{fmt, fs};
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 #[allow(unused)] // TODO: delete this line for Milestone 4
@@ -54,7 +55,6 @@ pub struct OpenFile {
 }
 
 impl OpenFile {
-    #[allow(unused)] // TODO: delete this line for Milestone 4
     pub fn new(name: String, cursor: usize, access_mode: AccessMode) -> OpenFile {
         OpenFile {
             name,
@@ -69,92 +69,54 @@ impl OpenFile {
     /// * For regular files, this will simply return the supplied path.
     /// * For terminals (files starting with /dev/pts), this will return "<terminal>".
     /// * For pipes (filenames formatted like pipe:[pipenum]), this will return "<pipe #pipenum>".
-    #[allow(unused)] // TODO: delete this line for Milestone 4
     fn path_to_name(path: &str) -> String {
-        // if path.starts_with("/dev/pts/") {
-        //     String::from("<terminal>")
-        // } else if path.starts_with("pipe:[") && path.ends_with("]") {
-        //     let pipe_num = &path[path.find('[').unwrap() + 1..path.find(']').unwrap()];
-        //     format!("<pipe #{}>", pipe_num)
-        // } else {
-        //     String::from(path)
-        // }
-        // COMMAND   PID    USER   FD   TYPE DEVICE   OFFSET NODE NAME
-        let v: Vec<&str> = path.split(' ').collect();
-        return v[8].to_string();
+        if path.starts_with("/dev/pts/") {
+            String::from("<terminal>")
+        } else if path.starts_with("pipe:[") && path.ends_with("]") {
+            let pipe_num = &path[path.find('[').unwrap() + 1..path.find(']').unwrap()];
+            format!("<pipe #{}>", pipe_num)
+        } else {
+            String::from(path)
+        }
     }
 
     /// This file takes the contents of /proc/{pid}/fdinfo/{fdnum} for some file descriptor and
     /// extracts the cursor position of that file descriptor (technically, the position of the
     /// open file table entry that the fd points to) using a regex. It returns None if the cursor
     /// couldn't be found in the fdinfo text.
-    #[allow(unused)] // TODO: delete this line for Milestone 4
     fn parse_cursor(fdinfo: &str) -> Option<usize> {
         // Regex::new will return an Error if there is a syntactical error in our regular
         // expression. We call unwrap() here because that indicates there's an obvious problem with
         // our code, but if this were code for a critical system that needs to not crash, then
         // we would want to return an Error instead.
-        // let re = Regex::new(r"pos:\s*(\d+)").unwrap();
-        // Some(
-        //     re.captures(fdinfo)?
-        //         .get(1)?
-        //         .as_str()
-        //         .parse::<usize>()
-        //         .ok()?,
-        // )
-        // COMMAND   PID    USER   FD   TYPE DEVICE   OFFSET NODE NAME
-        // zsh     23030 zeroliu    0u   CHR   16,3 0t320774  671 /dev/ttys003
-        let v: Vec<&str> = fdinfo.split(' ').collect();
-        let offset = v[6][2..].to_string();
-        return offset.parse::<usize>().ok();
+        let re = Regex::new(r"pos:\s*(\d+)").unwrap();
+        Some(
+            re.captures(fdinfo)?
+                .get(1)?
+                .as_str()
+                .parse::<usize>()
+                .ok()?,
+        )
     }
 
     /// This file takes the contents of /proc/{pid}/fdinfo/{fdnum} for some file descriptor and
     /// extracts the access mode for that open file using the "flags:" field contained in the
     /// fdinfo text. It returns None if the "flags" field couldn't be found.
-    #[allow(unused)] // TODO: delete this line for Milestone 4
     fn parse_access_mode(fdinfo: &str) -> Option<AccessMode> {
         // Regex::new will return an Error if there is a syntactical error in our regular
         // expression. We call unwrap() here because that indicates there's an obvious problem with
         // our code, but if this were code for a critical system that needs to not crash, then
         // we would want to return an Error instead.
-        // let re = Regex::new(r"flags:\s*(\d+)").unwrap();
-        // // Extract the flags field and parse it as octal
-        // let flags = usize::from_str_radix(re.captures(fdinfo)?.get(1)?.as_str(), 8).ok()?;
-        // if flags & O_WRONLY > 0 {
-        //     Some(AccessMode::Write)
-        // } else if flags & O_RDWR > 0 {
-        //     Some(AccessMode::ReadWrite)
-        // } else {
-        //     Some(AccessMode::Read)
-        // }
-        // COMMAND   PID    USER   FD   TYPE DEVICE   OFFSET NODE NAME
-        // zsh     23030 zeroliu    0u   CHR   16,3 0t320774  671 /dev/ttys003
-        let v: Vec<&str> = fdinfo.split(' ').collect();
-        let mut fd = v[3].to_string();
-        let mode = fd.pop()?;
-        return Self::match_mode(mode);
-    }
-
-    fn match_mode(mode: char) -> Option<AccessMode> {
-        match mode {
-            'u' => Some(AccessMode::ReadWrite),
-            'r' => Some(AccessMode::Read),
-            'w' => Some(AccessMode::Write),
-            _ => None,
+        let re = Regex::new(r"flags:\s*(\d+)").unwrap();
+        // Extract the flags field and parse it as octal
+        let flags = usize::from_str_radix(re.captures(fdinfo)?.get(1)?.as_str(), 8).ok()?;
+        if flags & O_WRONLY > 0 {
+            Some(AccessMode::Write)
+        } else if flags & O_RDWR > 0 {
+            Some(AccessMode::ReadWrite)
+        } else {
+            Some(AccessMode::Read)
         }
-    }
-
-    fn parse_fd(fdinfo: &str) -> Option<(usize, AccessMode, usize, String)> {
-        // COMMAND   PID    USER   FD   TYPE DEVICE   OFFSET NODE NAME
-        // zsh     23030 zeroliu    0u   CHR   16,3 0t320774  671 /dev/ttys003
-        let v: Vec<&str> = fdinfo.split(' ').collect();
-        let mut fd_str = v[3].to_string();
-        let mode = Self::match_mode(fd_str.pop()?)?;
-        let name = v[8].to_string();
-        let offset = v[6][2..].to_string().parse().ok()?;
-        let fd = fd_str.parse().ok()?;
-        return Some((fd, mode, offset, name));
     }
 
     /// Given a specified process and fd number, this function reads /proc/{pid}/fd/{fdnum} and
@@ -171,35 +133,17 @@ impl OpenFile {
     /// simple way to indicate that "hey, we weren't able to get the necessary information"
     /// without making a big deal of it.)
     pub fn from_fd(pid: usize, fd: usize) -> Option<OpenFile> {
-        let mut lsof_out = Command::new("lsof")
-            .arg("-X").arg("-p").arg(pid.to_string())
-            .stdout(Stdio::piped()).spawn().ok()?;
-        let awk_output = Command::new("awk")
-            .arg("NR>1")
-            .stdin(lsof_out.stdout.take().unwrap()).output().ok()?;
-        let output_str = String::from_utf8(awk_output.stdout).ok()?;
-        let mut output = Vec::new();
-        for line in output_str.lines() {
-            println!("line={}", line);
-            output.push(line);
-        }
-        for fd_info in output {
-            let _parse = Self::parse_fd(fd_info);
-            match _parse {
-                Some(info) => {
-                    if info.0 == fd {
-                        let op = OpenFile {
-                            name: info.3,
-                            cursor: info.2,
-                            access_mode: info.1,
-                        };
-                        return Some(op);
-                    }
-                }
-                None => {}
-            }
-        }
-        return None;
+        let path = OpenFile::path_to_name(fs::read_link(format!("/proc/{}/fd/{}", pid, fd)).ok()?.to_str()?);
+        let fd_info = fs::read_to_string(format!("/proc/{}/fdinfo/{}", pid, fd)).ok()?;
+
+        let file_name = Self::path_to_name(&path);
+        let cursor = Self::parse_cursor(&fd_info)?;
+        let mode = Self::parse_access_mode(&fd_info)?;
+        return Some(OpenFile {
+            name: file_name,
+            cursor: cursor,
+            access_mode: mode,
+        });
     }
 
     /// This function returns the OpenFile's name with ANSI escape codes included to colorize
